@@ -1,0 +1,1090 @@
+Title
+========================================================
+
+
+
+```{r, warning=F}
+options(width=150)
+###########################################################
+### Globale Optionen
+# memory.size(max=T)
+# memory.limit(size=3500)
+# system("grep MemFree /proc/meminfo", intern=TRUE) # Info RAM in Domino
+
+### Verteilung von Tasks auf mehrere Cores
+require(doParallel)
+detectCores()
+registerDoParallel(4)
+# getDoParWorkers() #' How many workers do we have?
+
+### Auslagern von Daten auf die Festplatte waehrend der Analyse
+# require("SOAR")
+# Remove(Objects()) # Cache leeren
+
+### Memory leeren
+# rm(list=ls())
+
+### Ein paar zentrale libraries
+# install.packages("ggplot2"); install.packages("caret"); install.packages("Metrics"); install.packages("lattice"); install.packages("data.table")
+require(ggplot2); require(caret); require(Metrics); require(lattice); require(data.table)
+
+### Eigene Funktion um Modellprognosen zu plotten
+plotyydach <- function(obs, pr){
+  fitpoints <- cbind(obs[], pr[]) # Die beobachteten mit den vorhergesagten Werten kombinieren.
+  fitcorr <- format(cor(fitpoints[,1], fitpoints[,2])^2, digits=3) # Die Pseudo-R2 erhalten
+  op <- par(c(lty="solid", col="blue")) # Einstellungen fuer die wahren Punkte und beste Anpassung zeichnen
+  layout(matrix(c(1),1,1))
+  plot(fitpoints[,1], fitpoints[,2], asp=1, xlab="Beobachtet", ylab="Vorhergesagt") # Beobachtete (X) gegenueber vorhergesagten Punkten (Y) anzeigen
+  prline <- lm(fitpoints[,2] ~ fitpoints[,1]); abline(prline) # Eine einfache lineare Anpassung zwischen vorhergesagten und beobachteten erstellen
+  par(c(lty="solid", col="black")); abline(0, 1) # Eine Diagonale als perfekte Korrelation zeichnen
+  legend("bottomright", sprintf(" Pseudo-R-Quadrat=%s ", fitcorr), bty="n") # Ein Pseudo-R-Quadrat in die Grafik einbeziehen
+  title(main="Vorhergesagt vs. Beobachtet"); grid() # Der Grafik einen Titel und ein Gitternetz geben
+}
+
+setwd("/home/ubuntu/Restaurant_Revenue_Prediction")
+getwd()
+
+###########################################################
+### Daten einlesen
+# path <- "C:/Users/b025336/NoBackupData/R/Analysen/" # Arbeit
+path <- "/home/ubuntu/Restaurant_Revenue_Prediction/data/" # zu Hause
+# path <- ""            # Amazon
+# AnzZeilen <- 100000
+# train <- fread(paste0(path, "train.csv"), header=TRUE, sep=",", nrows=AnzZeilen)
+train <- fread(paste0(path, "train.csv"), header=TRUE, sep=",")
+# View(train)
+
+
+test <- fread(paste0(path, "test.csv"), header=TRUE, sep=",")
+# train <- read.csv(paste0(path, "Kaggle - bike-sharing-demand - data train.csv"),header=TRUE, sep=",") # nrows=1000 # fread
+# test <- read.csv(paste0(path, "Kaggle - bike-sharing-demand - data test.csv"),header=TRUE, sep=",")  # nrows=1000 # fread
+head(train)
+str(train)
+summary(train)
+names(train)
+View(test)
+str(test)
+summary(test)
+names(test)
+
+
+# format datetime and factors
+# train$Id <- factor(train$Id)
+setnames(train,"Open Date","OpenDate"); setnames(train,"City Group","CityGroup")
+train$OpenYear <- factor(substr(train$OpenDate,7,10))
+train$OpenMonth <- factor(months(train$OpenDate), levels=c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+train$City <- factor(train$City)
+train$CityGroup <- factor(train$CityGroup)
+train$Type <- factor(train$Type)
+# train$P1 <- factor(train$P1)
+# train$P5 <- factor(train$P5)
+# train$P6 <- factor(train$P6)
+# train$P7 <- factor(train$P7)
+# train$P8 <- factor(train$P8)
+# train$P9 <- factor(train$P9)
+# train$P10 <- factor(train$P10)
+# train$P11 <- factor(train$P11)
+# train$P12 <- factor(train$P12)
+# train$P14 <- factor(train$P14)
+# train$P15 <- factor(train$P15)
+# train$P16 <- factor(train$P16)
+# train$P17 <- factor(train$P17)
+# train$P18 <- factor(train$P18)
+# train$P19 <- factor(train$P19)
+# train$P20 <- factor(train$P20)
+# train$P21 <- factor(train$P21)
+# train$P22 <- factor(train$P22)
+# train$P23 <- factor(train$P23)
+# train$P24 <- factor(train$P24)
+# train$P25 <- factor(train$P25)
+# train$P31 <- factor(train$P31)
+# train$P32 <- factor(train$P32)
+# train$P33 <- factor(train$P33)
+# train$P34 <- factor(train$P34)
+# train$P35 <- factor(train$P35)
+# train$P36 <- factor(train$P36)
+# train$P37 <- factor(train$P37)
+train$OpenMonth <- as.numeric(train$OpenMonth)
+# train$OpenMonth <- factor(train$OpenMonth, levels=c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+
+# das gleiche fuer die Testdaten durchfuehren...
+# test$Id <- factor(test$Id)
+setnames(test,"Open Date","OpenDate"); setnames(test,"City Group","CityGroup")
+test$OpenYear <- factor(substr(test$OpenDate,7,10))
+test$OpenMonth <- factor(months(test$OpenDate), levels=c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+test$City <- factor(test$City)
+test$CityGroup <- factor(test$CityGroup)
+test$Type <- factor(test$Type)
+# test$P1 <- factor(test$P1)
+# test$P5 <- factor(test$P5)
+# test$P6 <- factor(test$P6)
+# test$P7 <- factor(test$P7)
+# test$P8 <- factor(test$P8)
+# test$P9 <- factor(test$P9)
+# test$P10 <- factor(test$P10)
+# test$P11 <- factor(test$P11)
+# test$P12 <- factor(test$P12)
+# test$P14 <- factor(test$P14)
+# test$P15 <- factor(test$P15)
+# test$P16 <- factor(test$P16)
+# test$P17 <- factor(test$P17)
+# test$P18 <- factor(test$P18)
+# test$P19 <- factor(test$P19)
+# test$P20 <- factor(test$P20)
+# test$P21 <- factor(test$P21)
+# test$P22 <- factor(test$P22)
+# test$P23 <- factor(test$P23)
+# test$P24 <- factor(test$P24)
+# test$P25 <- factor(test$P25)
+# test$P31 <- factor(test$P31)
+# test$P32 <- factor(test$P32)
+# test$P33 <- factor(test$P33)
+# test$P34 <- factor(test$P34)
+# test$P35 <- factor(test$P35)
+# test$P36 <- factor(test$P36)
+# test$P37 <- factor(test$P37)
+test$OpenMonth <- as.numeric(test$OpenMonth)
+# test$OpenMonth <- factor(test$OpenMonth, levels=c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+
+
+# Levels abgleichen
+test$revenue <- 1234567890
+
+train$data_type <- "train"
+test$data_type <- "test"
+
+alle <- rbind(train, test)
+# str(alle)
+levels(alle$City)
+
+# City zusammen fassen
+levels(train$City) <- c(levels(train$City), "Other")
+levels(test$City) <- c(levels(test$City), "Other")
+levels(alle$City) <- c(levels(alle$City), "Other")
+i <- "Ä°stanbul"   ## İstanbul 이 아닌지는 확인이 필요해 보임 
+for (i in levels(alle$City)) {
+  if (nrow(train[train$City==i]) <= 1) {
+    train$City[train$City==i] <- "Other"
+    test$City[test$City==i] <- "Other"
+    alle$City[alle$City==i] <- "Other" 
+  } }
+alle <- droplevels(alle)   # train <- droplevels(train); test <- droplevels(test); 
+table(alle$City)           # table(train$City); table(test$City); 
+
+# alle$OpenMonth <- factor(alle$OpenMonth, levels=c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+# str(alle)
+
+# train <- alle[1:137,]
+# test <- alle[138:100137,]    ### 뭔가 나누는 작업 이상함  
+train <- alle[alle$data_type == "train",]
+train$data_type <- NULL
+test <- alle[alle$data_type == "test",]
+test$data_type <- NULL
+
+names(test)
+names(train)
+
+Id <- as.numeric(test$Id)
+test$Id <- NULL
+test$OpenDate <- NULL
+test$revenue <- NULL
+# str(datenModell)
+# str(test)
+
+# datenCONT <- as.data.frame(train); for (i in ncol(datenCONT):1) {if (class(datenCONT[,i])=="factor") (datenCONT <- datenCONT[,-i])}; names(datenCONT)
+datenCONT <- as.data.frame(train); 
+
+for (i in ncol(datenCONT):1) {
+  print(class(datenCONT[,i]))
+  if (class(datenCONT[,i]) %in% c('factor','character')) (datenCONT <- datenCONT[,-i])
+
+}
+names(datenCONT)  ## factor 혹은 chr 이면 제외하는 코드로 변경함 
+
+
+datenCONT <- datenCONT[, -c(1,12)]; names(datenCONT)
+datenKAT <- as.data.frame(train); for (i in ncol(datenKAT):1) {if (class(datenKAT[,i])!="factor") (datenKAT <- datenKAT[,-i])}; names(datenKAT)
+datenKAT <- datenKAT[, -c(1)]; names(datenKAT)
+datenKAT <- cbind(datenKAT, train$OpenMonth); names(datenKAT)
+
+
+
+###########################################################
+### Daten kennen lernen
+## Statistiken
+str(train) # Allgemeine trainstruktur
+summary(train) # Zusammenfassung von Statistiken
+# install.packages("Hmisc")
+require(Hmisc); describe(train[,]) # describe(train[, c(1, 2)])
+
+# Histogramm, Plots und Correlation aller numerischen Variablen
+str(datenCONT)
+names(datenCONT)
+
+
+
+cor(datenCONT)
+cor.prob <- function (X, dfr=nrow(X) - 2) { R <- cor(X, use="pairwise.complete.obs"); above <- row(R) < col(R); r2 <- R[above]^2; Fstat <- r2 * dfr/(1 - r2); R[above] <- 1 - pf(Fstat, 1, dfr); R[row(R) == col(R)] <- NA; R }
+cor.prob(datenCONT)
+flattenSquareMatrix <- function(m) {
+  if( (class(m) != "matrix") | (nrow(m) != ncol(m))) stop("Must be a square matrix.")
+  if(!identical(rownames(m), colnames(m))) stop("Row and column names must be equal.")
+  ut <- upper.tri(m)
+  data.frame(i=rownames(m)[row(m)[ut]], j=rownames(m)[col(m)[ut]], cor=t(m)[ut], p=m[ut]) }
+flattenSquareMatrix(cor.prob(datenCONT)); require(PerformanceAnalytics); chart.Correlation(datenCONT)
+
+# Saeulengrafiken fuer kategoriale Variablen
+# Häufigkeiten
+par(mfrow=c(2,2)); for (i in 1:ncol(datenKAT)) {barplot(table(datenKAT[,i]), beside=TRUE, main=names(datenKAT[i]))}
+par(mfrow=c(1,1))
+# Boxplots y group by xKAT
+y <- train$revenue # y auswählen
+par(mfrow=c(1,2)); for (i in 1:ncol(datenKAT)) {boxplot(y ~ datenKAT[,i], main=paste(names(datenKAT[i]), "( p-Wert=",round(summary(aov(y ~ datenKAT[,i]))[[1]][["Pr(>F)"]][[1]], digits=3),")"), type="l", par(las=2))}
+par(mfrow=c(1,1))
+
+
+# Spezielle Grafiken
+qplot(revenue, data=train)
+qplot(City, revenue, data=train, geom=c("boxplot", "jitter"))
+qplot(CityGroup, revenue, data=train, geom=c("boxplot", "jitter"))
+qplot(Type, revenue, data=train, geom=c("boxplot", "jitter"))
+qplot(OpenYear, revenue, data=train, geom=c("boxplot", "jitter"))
+qplot(OpenMonth, revenue, data=train, geom=c("boxplot", "jitter"))
+
+train[train$OpenYear==2014,]
+
+# qplot(hour, casual, data=train, facets=weekday~., geom="boxplot")
+# qplot(weekday, casual, data=train, geom="jitter")
+
+# qplot(datetime, registered, data=train)
+# qplot(hour, registered, data=train, facets=weekday~., geom="boxplot")
+# qplot(weekday, registered, data=train, geom="jitter")
+
+# qplot(weekday, count, data=train, geom=c("boxplot", "jitter"), fill=hour)
+# qplot(count, data=train, geom="density", fill=weekday, alpha=I(.5))
+# qplot(weekday, count, data=train, stat="sum")
+# qplot(weekday, count, data=train, shape=hour, color=hour, facets=weekday~hour, size=I(3))
+
+
+
+###########################################################
+### Outlier trimmen
+# x <- train$revenue
+# x2 <- x; x2[x > 10000000] <- 10000000
+# train$revenue <- x2
+
+
+
+###########################################################
+### Daten fuer Modellierung auswählen
+
+# (Modell 1) revenue ~ ...
+names(train)
+datenModell <- as.data.frame(train)
+datenModell <- datenModell[,-c(1:2)]; names(datenModell) # Evtl. Spalten entfernen
+y <- datenModell$revenue # y auswählen
+# Trainingsdatenset erstellen
+set.seed(1) # Die erste Zufallszahl zuruecksetzen, sodass immmer die gleichen Ergebnisse erhalten werden
+inTrain <- createDataPartition(y=y, p=0.7, list=FALSE)
+training <- datenModell[inTrain,]; testing <- datenModell[-inTrain,]
+ytraining <- training$revenue; ytesting <- testing$revenue # y auswählen
+# y entfernen
+names(datenModell)
+Positiony <- 41
+datenModell <- datenModell[,-Positiony]
+training <- training[,-Positiony]; testing <- testing[,-Positiony]
+str(datenModell)
+
+# (Modell 2) revenue ~ ... bootstrapping 1x
+names(train)
+datenModell <- as.data.frame(train)
+datenModell <- datenModell[,-c(1:2)]; names(datenModell) # Evtl. Spalten entfernen
+y <- datenModell$revenue # y auswählen
+# Trainingsdatenset erstellen
+set.seed(1) # Die erste Zufallszahl zuruecksetzen, sodass immmer die gleichen Ergebnisse erhalten werden
+inTrain <- createDataPartition(y=y, p=0.7, list=FALSE)
+training <- datenModell[inTrain,]; testing <- datenModell[-inTrain,]
+ytraining <- training$revenue; ytesting <- testing$revenue # y auswählen
+# bootstrapping tryining, ytraining
+# training2 <- training[sample(nrow(training), size=nrow(training)*1, replace=TRUE),]
+training2 <- training
+training2$revenue <- training2$revenue * rnorm(nrow(training2), 1, 0.01)
+training <- rbind(training, training2)
+ytraining <- training$revenue
+# y entfernen
+names(datenModell)
+Positiony <- 41
+datenModell <- datenModell[,-Positiony]
+training <- training[,-Positiony]; testing <- testing[,-Positiony]
+str(datenModell)
+
+
+
+###########################################################
+### Multivariate Adaptive Regression Splines (MARS) 
+
+# rm(mars)
+str(ytraining)
+str(training)
+
+require(earth)
+mars <- earth(ytraining~., data=training, degree=1, penalty=2) # penalty=if(degree > 1) 3 else 2
+mars <- earth(ytraining~., data=training, degree=2, penalty=3) # penalty=if(degree > 1) 3 else 2
+plot(mars, which=1:4)
+plotmo(mars)
+summary(mars, digits=2, style="pmax")
+ev <- evimp(mars, trim=TRUE); print(ev) # ; plot(ev) # Importance der Variablen
+
+### Plot Prognose vs. IST
+pr <- predict(mars, training); obs <- ytraining[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- predict(mars, testing); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+# Testdaten prognostizieren      RMSE=2,93
+mars <- earth(y~., data=datenModell, degree=2, penalty=3) # penalty=if(degree > 1) 3 else 2
+pr <- round(predict(mars, test), 0); summary(pr)
+# pr[pr<1149870] <- 1149870; summary(pr)
+pr[pr<100000] <- 100000; summary(pr)
+
+length(Id)
+# length(test$Id)   ## 앞에서 지웠음 
+
+# submit <- as.data.frame(cbind(as.data.frame(test$Id), pr))
+submit <- as.data.frame(cbind(as.data.frame(Id), pr))
+colnames(submit)<-c("Id","Prediction")
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission MARS.csv"), row.names=FALSE)
+
+
+
+###########################################################
+### Random Forrest        
+
+library(caret)
+# install.packages("randomForest")
+library(randomForest)
+# caret
+tc <- trainControl(method="oob")                  # nur rf und cforest und viel schneller
+# tc <- trainControl(method="repeatedcv", number=5) # alle anderen und langsam
+rf <- train(y~., data=datenModell, method="rf", trControl=tc, tuneLength=10, importance=F, ntree=500); rf
+rf <- train(y~., data=datenModell, method="rf", trControl=tc, tuneGrid=expand.grid(mtry=c(1,2,3,4,5,6,8,10)), importance=F, ntree=10000); rf
+# rf <- train(ytraining~., data=training, method="cforest", trControl=tc, tuneLength=10, importance=TRUE); rf
+# rf <- train(ytraining~., data=training, method="extraTrees", trControl=tc, tuneLength=10, importance=TRUE); rf
+# summary(rf)
+plot(varImp(rf)) #, scale=FALSE))
+plot(rf$results$mtry, rf$results$RMSE)
+
+
+require(randomForest)
+rf <- randomForest(y~., data=datenModell, ntree=500, importance=FALSE, proximity=FALSE); rf
+rf <- randomForest(y~., data=datenModell, ntree=500, mtry=9, importance=FALSE, proximity=FALSE); rf
+# rf <- randomForest(ytraining~., data=training, xtest=testing, ytest=ytesting, ntree=10, mtry=9); rf
+
+# Parametertuning mtry      # mtryStart=2, 
+tuneRF(datenModell, y, ntreeTry=5000, stepFactor=1.3, improve=0.001, trace=TRUE, plot=TRUE, doBest=FALSE)
+
+#  Regularized Random Forest (wie randomForest aber mit flagReg=1)
+# require(RRF)
+## RRF는 뭔가 .. Error: could not find function "RRF"  .. 그래서 닫아 둠 
+# rf <- RRF(ytraining~., data=training, ntree=5000, mtry=5, flagReg=1, importance=FALSE, proximity=FALSE); rf
+
+
+# randomForest
+# require(randomForest) # not for: censored response variables; multivariate and ordered responses
+# rf <- randomForest(ytraining~., method="rf", data=training, mtry=5, ntree=500, keep.forest=TRUE, importance=TRUE, proximity=TRUE) # , mtry=5
+# print(rf)
+# plot(rf)
+# varImpPlot(rf, sort=TRUE, scale=TRUE) # importance of each predictor
+# round(importance(rf), 2) # importance of each predictor
+# getTree(rf,k=1,labelVar=TRUE)
+# require(rattle); printRandomForests(rf, 1) # einen bestimmten Baum beschreiben
+# varUsed(rf)
+
+# Schleife, um den besten Parameter mtry zu finden (variables randomly sampled as candidates at each split):
+# rm(Summary_R2); Summary_R2 <- matrix(nrow=20, ncol=3, byrow=TRUE); i=1
+# for (mtry in c(2:15)) {
+#  print(paste("mtry =", mtry))
+#  rf <- randomForest(ytraining~., method="rf", data=training, ntree=500, mtry=mtry, na.action=na.omit)
+#  Summary_R2[i,1] <- mtry
+#  Summary_R2[i,2] <- round(rmse(ytraining,predict(rf, training)),3)
+#  Summary_R2[i,3] <- round(rmse(ytesting,predict(rf, testing)),3)
+#  i <- i+1 }
+# Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("metry", "train", "test")
+# require("reshape2"); data_long <- melt(Summary_R2, id="metry"); ggplot(data=data_long, aes(x=metry, y=value, colour=variable)) + geom_line(); Summary_R2
+
+
+### Plot Prognose vs. IST
+pr <- predict(rf, training); obs <- ytraining[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- predict(rf, testing); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+# Modell prognostizieren       RMSE=1,86 bootstr10=2,31 bootstr1=1,81 5000=1,75
+# tc <- trainControl(method="oob")
+tc <- trainControl(method="repeatedcv", number=10)
+rf <- train(y~., data=datenModell, method="rf", trControl=tc, tuneGrid=expand.grid(mtry=c(2,3,4,5,6,8,10)), importance=TRUE, ntree=10000); rf
+# rf <- train(y~., data=datenModell, method="rf", trControl=tc, tuneLength=10, importance=TRUE); rf
+pr <- predict(rf, datenModell); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- round(predict(rf, test), 0); summary(pr)
+pr[pr<1149870] <- 1149870; summary(pr)
+submit <- as.data.frame(cbind(as.data.frame(test$Id), pr))
+colnames(submit)<-c("Id","Prediction")
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission RF 5000.csv"), row.names=FALSE)
+
+
+
+###########################################################
+### Extreme randomized trees               
+
+# Error: could not find function "extraTrees"  에러가 나서 닫아 둠 
+
+
+options( java.parameters="-Xmx1g" )    ## Give more memory to Java: 1 GB
+require(extraTrees)
+numThreads=4   # Use more than one CPU-Core
+
+# turn train and test into matrices for dummy variables
+# trainmat <- sparse.model.matrix(ytraining~., data=training)
+# testmat <- sparse.model.matrix(ytesting~.,data=testing)
+require(Matrix)
+
+trainmat <- sparse.model.matrix(ytraining~., data=training)
+testmat <- sparse.model.matrix(ytesting~.,data=testing)
+
+# 아래 에러가 남 
+# Error in crossprod(if (is.character(contrasts.arg)) { : 
+#   error in evaluating the argument 'x' in selecting a method for function 'crossprod': Error in FUN(rownames(m), sparse = TRUE) : 
+#   unused argument (sparse = TRUE)
+
+# trainmat <- model.matrix(ytraining~., data=training)
+# testmat <- model.matrix(ytesting~.,data=testing)
+# 
+# 
+# # Parametertuning für mtry, numRandomCuts, nodesize:  
+# rm(Summary_R2); Summary_R2 <- matrix(nrow=1000, ncol=5, byrow=TRUE); i=1
+# for (mtry in c(7,8,9,10,11,12,13)) {          # default: regression=var/3; classification=sqrt(var)
+#   for (numRandomCuts in c(11,12,13,14,15,16)) {   # default: 1
+#     for (nodesize in c(1,2)) {   # default: regression=5; classification=1
+#       print(paste("mtry =", mtry, "; numRandomCuts =", numRandomCuts, "; nodesize =", nodesize))
+#       et <- extraTrees(trainmat, ytraining, ntree=1000, mtry=mtry, numRandomCuts=numRandomCuts, nodesize=nodesize, numThreads=numThreads)
+#       Summary_R2[i,1] <- mtry
+#       Summary_R2[i,2] <- numRandomCuts
+#       Summary_R2[i,3] <- nodesize
+#       Summary_R2[i,4] <- round(rmse(ytraining,predict(et, trainmat)),0)
+#       Summary_R2[i,5] <- round(rmse(ytesting,predict(et, testmat)),0)
+#       i <- i+1 } } }
+# Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("mtry", "numRandomCuts", "nodesize", "train", "test"); Summary_R2 <- Summary_R2[!is.na(Summary_R2$test),]; Summary_R2 <- Summary_R2[order(Summary_R2$test),]; Summary_R2$mtry <- as.factor(Summary_R2$mtry); Summary_R2$numRandomCuts <- as.factor(Summary_R2$numRandomCuts); Summary_R2$nodesize <- as.factor(Summary_R2$nodesize); Summary_R2
+# qplot(mtry, test, data=Summary_R2, facets=.~numRandomCuts, color=nodesize, main="test")
+# qplot(train, test, data=Summary_R2, color=mtry, shape=numRandomCuts, main="test vs train")
+# 
+# # Calculate Model
+# et <- extraTrees(trainmat, ytraining, numRandomCuts=1, numThreads=numThreads, ntree=ntree); et
+# 
+# pr <- predict(et, trainmat); obs <- ytraining[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+# pr <- predict(et, testmat); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+# 
+# # Modell prognostizieren
+# # Ergebnis für "Submission ET mtry nrc ns":   
+# trainmat <- sparse.model.matrix(y~., data=datenModell)
+# testmat <- sparse.model.matrix(~.,data=test)
+# et <- extraTrees(trainmat, ytraining, ntree=1000, mtry=mtry, numRandomCuts=numRandomCuts, nodesize=nodesize, numThreads=numThreads)
+# pr <- predict(et, trainmat); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+# pr <- round(predict(et, testmat), 0); summary(pr); hist(pr)
+# # pr[pr<1149870] <- 1149870; summary(pr)
+# submit <- as.data.frame(cbind(Id, pr))
+# colnames(submit)<-c("Id","Prediction"); head(submit)
+# write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission ET mtry nrc ns.csv"), row.names=FALSE)
+
+
+
+###########################################################
+### eXtreme Gradient Boosting
+
+# install.packages('xgboost')
+require(xgboost)
+
+# turn train and test into matrices for dummy variables
+# trainmat <- model.matrix(y~., data=datenModell)
+# testmat <- model.matrix(~.,data=test)
+require(Matrix)
+trainmat <- sparse.model.matrix(y~., data=datenModell)
+testmat <- sparse.model.matrix(~.,data=test)
+
+
+### Regression:
+bst <- xgboost(data=trainmat, label=y, objective="reg:linear", verbose=0,
+               max.depth=6, eta=0.02, nround=200, min_child_weight=1, gamma=0)
+pr <- predict(bst, trainmat); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- predict(bst, testmat); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+## Schleife, um die besten Parameter zu finden
+
+# Für boosted tree:
+
+# SummaryCV <- data.frame(date=character(0), depth=numeric(0), eta=numeric(0), nround=numeric(0), min_child_weight=numeric(0), gamma=numeric(0), train=numeric(0), test=numeric(0), runtime=numeric(0))
+# write.table(SummaryCV, file=paste0(path, "xgboost.csv"), row.names=F, col.names=T, append=F, sep=";", dec=",")
+
+# Random Search
+for (i in 1:50) {
+  depth <- sample(c(rep(1,5),2,3,4,5,6,7,8,9,10,15,20,30,50),1)   # (Default: 6)
+  eta <- sample(c(0.001,0.05,0.01,0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9),1)  # (Default: 0.3)
+  nround <- 300
+  min_child_weight <- sample(c(rep(1,14),2,3,4,5,6,7,8,9,10,15,20,30,50,100),1) # (Default: 1)
+  gamma <- sample(c(rep(0,12),0.1,0.2,0.3,0.4,0.5,0.75,1,1.5,2,3,4,5),1)        # (Default: 0)
+  start <- Sys.time(); try(rm(temp),silent=TRUE); temp <- data.frame(nrow=1, ncol=9, byrow=TRUE); print(paste(i, Sys.time(), "depth =", depth, "; eta =", eta, "; nround =", nround, "; min_child_weight =", min_child_weight, "; gamma =", gamma))
+  bst <- xgb.cv(data=trainmat, label=y, booster="gbtree", objective="reg:linear", verbose=0, max.depth=depth, eta=eta, nround=nround, eval_metric="rmse", min_child_weight=min_child_weight, gamma=gamma, nfold=5)
+  temp[1] <- as.character(start); temp[2] <- depth; temp[3] <- eta; temp[4] <- nround; temp[5] <- min_child_weight; temp[6] <- gamma; temp[7] <- as.numeric(bst[nround, train.rmse.mean]); temp[8] <- as.numeric(bst[nround, test.rmse.mean]); temp[9] <- round(as.numeric(Sys.time()-start, units="mins"),2)
+  if (as.numeric(which.min(bst[, test.rmse.mean])) != nround) { temp[4] <- as.numeric(which.min(bst[, test.rmse.mean])); temp[7] <- as.numeric(min(bst[, train.rmse.mean])); temp[8] <- as.numeric(min(bst[, test.rmse.mean])) }
+  write.table(temp, file=paste0(path, "xgboost.csv"), row.names=F, col.names=F, append=T, sep=";", dec=",") 
+}; print(Sys.time())
+
+# Grid Search
+for (depth in c(1,2,3,4,5,6,10)) {                    # (Default: 6) c(30,6,1)
+  for (eta in c(0.001,0.01,0.02,0.05,0.1)) {             # (Default: 0.3) c(0.001,0.01,0.1,0.3)
+    for (nround in c(300)) {
+      for (min_child_weight in c(1,3,5)) {      # (Default: 1) c(1,5,10)
+        for (gamma in c(0,0.5,1,2)) {                # (Default: 0) c(0,1,5)
+          start <- Sys.time(); try(rm(temp),silent=TRUE); temp <- data.frame(nrow=1, ncol=9, byrow=TRUE); print(paste(Sys.time(), "depth =", depth, "; eta =", eta, "; nround =", nround, "; min_child_weight =", min_child_weight, "; gamma =", gamma))
+          bst <- xgb.cv(data=trainmat, label=y, booster="gbtree", objective="reg:linear", verbose=0, max.depth=depth, eta=eta, nround=nround, eval_metric="rmse", min_child_weight=min_child_weight, gamma=gamma, nfold=5)
+          temp[1] <- as.character(start); temp[2] <- depth; temp[3] <- eta; temp[4] <- nround; temp[5] <- min_child_weight; temp[6] <- gamma; temp[7] <- as.numeric(bst[nround, train.rmse.mean]); temp[8] <- as.numeric(bst[nround, test.rmse.mean]); temp[9] <- round(as.numeric(Sys.time()-start, units="mins"),2)
+          if (as.numeric(which.min(bst[, test.rmse.mean])) != nround) { temp[4] <- as.numeric(which.min(bst[, test.rmse.mean])); temp[7] <- as.numeric(min(bst[, train.rmse.mean])); temp[8] <- as.numeric(min(bst[, test.rmse.mean])) }
+          write.table(temp, file=paste0(path, "xgboost.csv"), row.names=F, col.names=F, append=T, sep=";", dec=",") 
+        } } } } }; print(Sys.time())
+
+# View results
+SummaryCV <- read.table(file=paste0(path, "xgboost.csv"), header=T, sep=";", dec=","); SummaryCV <- SummaryCV[!is.na(SummaryCV$depth),]; SummaryCV <- SummaryCV[order(SummaryCV$test),]; SummaryCV[1:20,]
+library(earth); temp <- SummaryCV[,c(2:6,8)]; mars <- earth(test~., data=temp, degree=2, penalty=3); mars; plotmo(mars)
+qplot(train, test, color=depth, data=SummaryCV, main="test vs train", asp=1, xlim=c(0,NA), ylim=c(0,NA))
+qplot(train, test, color=eta, data=SummaryCV, main="test vs train", asp=1, xlim=c(0,NA), ylim=c(0,NA))
+qplot(nround, eta, data=SummaryCV, color=test, main="test")
+
+# Für random forest:
+
+# SummaryCV <- data.frame(date=character(0), depth=numeric(0), eta=numeric(0), nround=numeric(0), min_child_weight=numeric(0), gamma=numeric(0), train=numeric(0), test=numeric(0), runtime=numeric(0))
+# write.table(SummaryCV, file=paste0(path, "xgboost_rf.csv"), row.names=F, col.names=T, append=F, sep=";", dec=",")
+
+# Random Search
+for (i in 1:10) {
+  ntrees <- 500 # sample(c(50,500,5000),1)
+  mtry <- sample(c(0.02,0.06,0.2,0.5),1)   # (Default Regression: sqrt(variables)=0.06; Classification: variables/3)
+  depth <- sample(c(10,100,1000),1)
+  min_child_weight <- sample(c(rep(1,14),2,3,4,5,6,7,8,9,10,15,20,30,50,100),1) # (Default: 1)
+  gamma <- sample(c(rep(0,12),0.1,0.2,0.3,0.4,0.5,0.75,1,1.5,2,3,4,5),1)        # (Default: 0)
+  start <- Sys.time(); try(rm(temp),silent=TRUE); temp <- data.frame(nrow=1, ncol=9, byrow=TRUE); print(paste(Sys.time(), "; trees =", ntrees, "; mtry =", mtry, "; depth =", depth, "; min_child_weight =", min_child_weight, "; gamma =", gamma))
+  rf <- xgb.cv(data=trainmat, label=y, booster="gbtree", objective="reg:linear", verbose=0, max.depth=depth, eta=0.9999, nround=1, eval_metric="rmse", min_child_weight=min_child_weight, gamma=gamma, num_parallel_tree=ntrees, subsample=1, colsample_bytree=mtry, nfold=3)
+  temp[1] <- as.character(start); temp[2] <- ntrees; temp[3] <- mtry; temp[4] <- depth; temp[5] <- min_child_weight; temp[6] <- gamma; temp[7] <- as.numeric(rf[1,train.merror.mean]); temp[8] <- as.numeric(rf[1, test.merror.mean]); temp[9] <- round(as.numeric(Sys.time()-start, units="mins"),2)
+  write.table(temp, file=paste0(path, "xgboost_rf.csv"), row.names=F, col.names=F, append=T, sep=";", dec=",") 
+}; print(Sys.time())
+
+# Grid Search
+for (ntrees in c(50,500,5000)) {          # c(50,500,5000)
+  for (mtry in c(0.02,0.06,0.2,0.5)) {    # (Default Regression: sqrt(variables)=0.06; Classification: variables/3) c(0.02,0.06,0.2,0.5)
+    for (depth in c(10,100,1000)) {            # c(10,100,1000)
+      for (min_child_weight in c(1,5,10)) {      # (Default: 1) c(1,5,10)
+        for (gamma in c(0,1,5)) {                # (Default: 0) c(0,1,5)
+          start <- Sys.time(); try(rm(temp),silent=TRUE); temp <- data.frame(nrow=1, ncol=9, byrow=TRUE); print(paste(Sys.time(), "; trees =", ntrees, "; mtry =", mtry, "; depth =", depth, "; min_child_weight =", min_child_weight, "; gamma =", gamma))
+          rf <- xgb.cv(data=trainmat, label=y, booster="gbtree", objective="reg:linear", verbose=0, max.depth=depth, eta=0.9999, nround=1, eval_metric="rmse", min_child_weight=min_child_weight, gamma=gamma, num_parallel_tree=ntrees, subsample=1, colsample_bytree=mtry, nfold=3)
+          temp[1] <- as.character(start); temp[2] <- ntrees; temp[3] <- mtry; temp[4] <- depth; temp[5] <- min_child_weight; temp[6] <- gamma; temp[7] <- as.numeric(rf[1,train.rmse.mean]); temp[8] <- as.numeric(rf[1, test.rmse.mean]); temp[9] <- round(as.numeric(Sys.time()-start, units="mins"),2)
+          write.table(temp, file=paste0(path, "xgboost_rf.csv"), row.names=F, col.names=F, append=T, sep=";", dec=",")
+        } } } } }; print(Sys.time())
+
+# View results
+SummaryCV <- read.table(file=paste0(path, "xgboost_rf.csv"), header=T, sep=";", dec=","); SummaryCV <- SummaryCV[!is.na(SummaryCV$depth),]; SummaryCV <- SummaryCV[order(SummaryCV$test),]; SummaryCV[1:20,]
+library(earth); temp <- SummaryCV[,c(2:6,8)]; mars <- earth(test~., data=temp, degree=2, penalty=3); mars; plotmo(mars)
+qplot(train, test, color= ntrees, data=SummaryCV, main="test vs train", asp=1, xlim=c(0,NA), ylim=c(0,NA))
+qplot(ntrees, test, data=SummaryCV, color=mtry, main="test")
+
+
+# Modell prognostizieren
+# Ergebnis für "Submission XGB depth30 eta.05 tree43 child5 gamma1":   2,108
+# Ergebnis für "Submission XGB depth6 eta.01 tree271 child20 gamma4":   
+bst <- xgboost(data=trainmat, label=y, objective="reg:linear", verbose=0,
+               max.depth=6, eta=0.01, nround=271, min_child_weight=20, gamma=4)
+# bst <- xgboost(data=trainmat, label=y, objective="reg:linear", verbose=0,
+#                max.depth=6, eta=0.02, nround=205, min_child_weight=1, gamma=0)
+pr <- predict(bst, trainmat); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- round(predict(bst, testmat), 0); summary(pr); hist(pr)
+# pr[pr<1149870] <- 1149870; summary(pr)
+submit <- as.data.frame(cbind(Id, pr))
+colnames(submit)<-c("Id","Prediction"); head(submit)
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission XGB depth6 eta.01 tree271 child20 gamma4.csv"), row.names=FALSE)
+
+
+
+###########################################################
+### Stochastic Gradient Boosting
+
+# caret: gbm
+gbm <- train(ytraining~., data=training, method="gbm", trControl=trainControl(method="cv", number=5), tuneLength=10, n.trees=1000); gbm
+# gbm <- train(ytraining~., data=training, method='gbm', trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneGrid=expand.grid( n.trees=c(500), interaction.depth=seq(1,31,5), shrinkage=c(0.05,0.1,0.2)), metric='RMSE', maximize=FALSE)
+# gbm <- train(ytraining~., data=training, method='gbm', trControl=trainControl(method="cv", number=5), tuneGrid=expand.grid( n.trees=c(1000), interaction.depth=c(1,2,3), shrinkage=c(0.05,0.1,0.2)), metric='RMSE', maximize=FALSE)
+summary(gbm)
+trellis.par.set(caretTheme()); plot(gbm)
+# plot(varImp(gbm))
+
+### Plot Prognose vs. IST
+pr <- predict(gbm, training); obs <- ytraining[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3))) # alternativ statt best.iter: n.trees=1000
+pr <- predict(gbm, testing); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+# Modell prognostizieren       RMSE=1,86
+gbm <- train(y~., data=datenModell, method="gbm", trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneLength=5); gbm
+pr <- predict(gbm, datenModell); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- round(predict(gbm, test), 0); summary(pr)
+# pr[pr<1149870] <- 1149870; summary(pr)
+submit <- as.data.frame(cbind(as.data.frame(test$Id), pr))
+colnames(submit)<-c("Id","Prediction")
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission GBM.csv"), row.names=FALSE)
+
+
+
+###########################################################
+### SVM                                           
+
+# caret: svm
+# svm <- train(ytraining~., data=training, method="svmRadial", trControl=trainControl(method="repeatedcv", number=10), tuneLength=10, preProc=c("center", "scale")); svm
+# svm <- train(y~., data=datenModell, method="svmRadial", trControl=trainControl(method="repeatedcv", number=10), tuneLength=20, preProc=c("center", "scale")); svm
+# svm <- train(ytraining~., data=training, method="svmRadialCost", trControl=trainControl(method="repeatedcv", number=10), tuneLength=10, preProc=c("center", "scale")); svm
+# summary(svm)
+# trellis.par.set(caretTheme()); plot(svm)
+
+# e1071
+require(e1071)
+svm <- svm(ytraining~., data=training, cost=8, gamma=0.1, cross=5, na.action=na.omit, scale=TRUE, type="eps-regression"); summary(svm)
+# tobj <- tune.svm(svm, y~ ., data=datenModell, gamma=2^c(-8,-4,0), cost=2^c(-8,-4,0), na.action=na.omit); summary(tobj)
+
+# Schleife, um den besten Parameter COST zu finden:   8
+rm(Summary_R2); Summary_R2 <- matrix(nrow=20, ncol=3, byrow=TRUE); i=1
+for (cost in c(2,4,8,16,32,64,128,256)) {
+  print(paste("cost =", cost))
+  svm <- svm(ytraining~., data=training, cost=cost, gamma=0.1, cross=5, na.action=na.omit, scale=TRUE, type="eps-regression")
+  Summary_R2[i,1] <- cost
+  Summary_R2[i,2] <- round(rmse(ytraining,predict(svm, training)),3)
+  Summary_R2[i,3] <- round(rmse(ytesting,predict(svm, testing)),3)
+  i <- i+1 }
+Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("parameter", "train", "test")
+require("reshape2"); data_long <- melt(Summary_R2, id="parameter"); ggplot(data=data_long, aes(x=parameter, y=value, colour=variable)) + geom_line(); Summary_R2
+
+# Schleife, um den besten Parameter GAMMA zu finden:  0.1
+rm(Summary_R2); Summary_R2 <- matrix(nrow=20, ncol=3, byrow=TRUE); i=1
+for (gamma in c(0.0001,0.001,0.005,0.01,0.02,0.05,0.1,0.2,0.5,1)) { 
+  print(paste("gamma =", gamma))
+  svm <- svm(ytraining~., data=training, cost=8, gamma=gamma, cross=5, na.action=na.omit, scale=TRUE, type="eps-regression")
+  Summary_R2[i,1] <- gamma
+  Summary_R2[i,2] <- round(rmse(ytraining,predict(svm, training)),3)
+  Summary_R2[i,3] <- round(rmse(ytesting,predict(svm, testing)),3)
+  i <- i+1 }
+Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("parameter", "train", "test")
+require("reshape2"); data_long <- melt(Summary_R2, id="parameter"); ggplot(data=data_long, aes(x=parameter, y=value, colour=variable)) + geom_line(); Summary_R2
+
+
+### Plot Prognose vs. IST
+pr <- predict(svm, training); obs <- ytraining[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- predict(svm, testing); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+# Modell prognostizieren       RMSE=1,86
+svm <- svm(y~., data=datenModell, cost=8, gamma=0.1, cross=5, na.action=na.omit, scale=TRUE, type="eps-regression"); summary(svm)
+pr <- predict(svm, datenModell); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- round(predict(svm, test), 0); summary(pr)
+# pr[pr<1149870] <- 1149870; summary(pr)
+submit <- as.data.frame(cbind(as.data.frame(test$Id), pr))
+colnames(submit)<-c("Id","Prediction")
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission SVM BOOTSTRAP 1.csv"), row.names=FALSE)
+
+
+
+###########################################################
+### Relevance Vector Machine for Regression (RVM) 
+
+# caret: rvmRadial for Regression
+rvm <- train(ytraining~., data=training, method="rvmRadial", trControl=trainControl(method="repeatedcv", number=5, repeats=3), tuneLength=10, preProc=c("center", "scale")); rvm
+# summary(rvm)
+# trellis.par.set(caretTheme()); plot(rvm)
+
+# kernlab
+# require(kernlab)
+# rvm <- rvm(ytraining~., data=training, type="regression", kernel="rbfdot", kpar="automatic", cross=5); rvm
+
+
+### Plot Prognose vs. IST
+pr <- predict(rvm, training); obs <- ytraining[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- predict(rvm, testing); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+# Modell prognostizieren       RMSE=1,86
+rvm <- train(y~., data=datenModell, method="rvmRadial", trControl=trainControl(method="repeatedcv", number=5, repeats=3), tuneLength=10, preProc=c("center", "scale")); rvm
+pr <- predict(rvm, datenModell); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- round(predict(svm, test), 0); summary(pr)
+# pr[pr<1149870] <- 1149870; summary(pr)
+submit <- as.data.frame(cbind(as.data.frame(test$Id), pr))
+colnames(submit)<-c("Id","Prediction")
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission RVM BOOTSTRAP 1.csv"), row.names=FALSE)
+
+
+
+
+
+
+
+
+
+###########################################################
+### H2O
+
+h2o_ver <- "1511"
+require(h2o)
+localH2O=h2o.init(ip="localhost", port=54321, startH2O=TRUE, max_mem_size='1g', nthreads=3)
+# h2o.shutdown(localH2O, prompt=FALSE)  # H2O am Ende wieder schliessen
+
+# In h2o-Format bringen
+train_hex <- as.h2o(localH2O, as.data.frame(cbind(datenModell, y))); str(train_hex)
+test_hex <- as.h2o(localH2O, as.data.frame(test)); str(test_hex)
+# names(train_hex)
+
+## Split the dataset into 80:20 for training and validation
+train_hex_split <- h2o.splitFrame(train_hex, ratios=0.8, shuffle=TRUE); str(train_hex_split)
+
+
+
+### GBM
+model <- h2o.gbm(y=43, x=1:42, data=train_hex, n.trees=1000, nfolds=10, 
+                 interaction.depth=4, n.minobsinnode=1, shrinkage=0.001, 
+                 importance=FALSE, distribution="gaussian"); model
+pr <- as.matrix(h2o.predict(model, train_hex)); obs <- ytraining; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+# pr <- as.matrix(h2o.predict(model, test_hex)); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+# model$varimp[1:10]
+sqrt(6.27408e+12)
+
+
+## optimale Modellparameter finden
+
+# Grid search                        
+models <- h2o.gbm(y=43, x=1:42, data=train_hex, nfolds=10, n.trees=1000,
+                  interaction.depth=c(1,2,4,6),
+                  n.minobsinnode=c(1,2,10), 
+                  shrinkage=c(0.001,0.01,0.1),
+                  importance=FALSE, 
+                  distribution="gaussian")
+best_model <- models@model[[1]]; best_model
+best_params <- best_model@model$params
+best_params$interaction.depth      # 4
+best_params$n.minobsinnode         # 1 
+best_params$shrinkage              # 0.001
+models
+sqrt(6.35884e+12)
+# best_model@model$varimp[1:10]
+
+# interaction.depth: 4
+rm(Summary_R2); Summary_R2 <- matrix(nrow=10, ncol=3, byrow=TRUE); i=1
+for (parameter in c(1,2,3,4,5,6)) {
+  print(paste0("Parameter=", parameter))
+  model <- h2o.gbm(y=43, x=1:42, data=train_hex,
+                   n.trees=5000, interaction.depth=parameter,
+                   n.minobsinnode=2, shrinkage=0.01, distribution="gaussian")
+  Summary_R2[i,1] <- parameter
+  Summary_R2[i,2] <- round(rmse(ytraining,as.matrix(h2o.predict(model, train_hex))),3)
+  Summary_R2[i,3] <- round(rmse(ytesting,as.matrix(h2o.predict(model, test_hex))),3)
+  i <- i+1 }
+Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("Parameter", "train", "test")
+require("reshape2"); data_long <- melt(Summary_R2, id="Parameter"); ggplot(data=data_long, aes(x=Parameter, y=value, colour=variable)) + geom_line(); Summary_R2
+# shrinkage: 0.01
+rm(Summary_R2); Summary_R2 <- matrix(nrow=10, ncol=3, byrow=TRUE); i=1
+for (parameter in c(0.001,0.01,0.1,0.2)) {
+  print(paste0("Parameter=", parameter))
+  model <- h2o.gbm(y=43, x=1:42, data=train_hex,
+                   n.trees=5000, interaction.depth=4,
+                   n.minobsinnode=2, shrinkage=parameter, distribution="gaussian")
+  Summary_R2[i,1] <- parameter
+  Summary_R2[i,2] <- round(rmse(ytraining,as.matrix(h2o.predict(model, train_hex))),3)
+  Summary_R2[i,3] <- round(rmse(ytesting,as.matrix(h2o.predict(model, test_hex))),3)
+  i <- i+1 }
+Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("Parameter", "train", "test")
+require("reshape2"); data_long <- melt(Summary_R2, id="Parameter"); ggplot(data=data_long, aes(x=Parameter, y=value, colour=variable)) + geom_line(); Summary_R2
+
+# Modell prognostizieren       RMSE=
+model <- h2o.gbm(y=43, x=1:42, data=train_hex, n.trees=1000, # nfolds=5, 
+                 interaction.depth=4, n.minobsinnode=1, shrinkage=0.001, 
+                 importance=FALSE, distribution="gaussian"); model
+pr <- predict(model, datenModell); obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- round(predict(model, test_hex), 0); summary(pr)
+pr[pr<1149870] <- 1149870; summary(pr)
+submit <- as.data.frame(cbind(as.data.frame(test$Id), pr))
+colnames(submit)<-c("Id","Prediction")
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission H2O GBM.csv"), row.names=FALSE)
+
+
+
+### Random Forest                                
+model <- h2o.randomForest(y=43, x=1:42, data=train_hex, ntree=500, depth=15,
+                          mtries=10, classification=FALSE, importance=FALSE, nfolds=5, 
+                          type="BigData"); model
+pr <- as.matrix(h2o.predict(model, train_hex)); obs <- ytraining; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+# pr <- as.matrix(h2o.predict(model, test_hex)); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+model2 <- h2o.getModel(localH2O, "DRF_822e48468c4bf3a959962b9615bd4097"); pr <- as.matrix(h2o.predict(model2, train_hex)); obs <- as.data.frame(train_hex[, y]); plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+sqrt(6.27408e+12)
+
+
+## optimale Modellparameter finden
+
+# Grid search                        
+models <- h2o.randomForest(y=43, x=1:42, data=train_hex, nfolds=5, ntree=500,
+                           depth=c(1,2,4,6,8,12,16),
+                           mtries=c(1,2,4,6,8), 
+                           importance=FALSE, type="BigData")
+best_model <- models@model[[1]]; best_model
+best_params <- best_model@model$params
+best_params$depth
+best_params$mtries
+sqrt(best_model@model$train_sqr_error); sqrt(best_model@model$valid_sqr_error)
+# best_model@model$varimp[1:10]
+
+# mtries: 10
+rm(Summary_R2); Summary_R2 <- matrix(nrow=10, ncol=3, byrow=TRUE); i=1
+for (parameter in c(2,4,7,10,15,20)) {
+  print(paste0("Parameter=", parameter))
+  model <- h2o.randomForest(y=43, x=1:42, data=train_hex, ntree=500, depth=15,
+                            mtries=parameter, classification=FALSE, importance=FALSE, # nfolds=5, 
+                            type="BigData")
+  Summary_R2[i,1] <- parameter
+  Summary_R2[i,2] <- round(rmse(ytraining,as.matrix(h2o.predict(model, train_hex))),3)
+  Summary_R2[i,3] <- round(rmse(ytesting,as.matrix(h2o.predict(model, test_hex))),3)
+  i <- i+1 }
+Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("Parameter", "train", "test")
+require("reshape2"); data_long <- melt(Summary_R2, id="Parameter"); ggplot(data=data_long, aes(x=Parameter, y=value, colour=variable)) + geom_line(); Summary_R2
+# depth: 15
+rm(Summary_R2); Summary_R2 <- matrix(nrow=10, ncol=3, byrow=TRUE); i=1
+for (parameter in c(1,2,4,7,10,15,20)) {
+  print(paste0("Parameter=", parameter))
+  model <- h2o.randomForest(y=43, x=1:42, data=train_hex, ntree=500, depth=parameter,
+                            mtries=10, classification=FALSE, importance=FALSE, # nfolds=5, 
+                            type="BigData")
+  Summary_R2[i,1] <- parameter
+  Summary_R2[i,2] <- round(rmse(ytraining,as.matrix(h2o.predict(model, train_hex))),3)
+  Summary_R2[i,3] <- round(rmse(ytesting,as.matrix(h2o.predict(model, test_hex))),3)
+  i <- i+1 }
+Summary_R2 <- as.data.frame(Summary_R2); names(Summary_R2) <- c("Parameter", "train", "test")
+require("reshape2"); data_long <- melt(Summary_R2, id="Parameter"); ggplot(data=data_long, aes(x=Parameter, y=value, colour=variable)) + geom_line(); Summary_R2
+
+
+
+### Deep Neural Network Model with Grid Search!!!
+# Rectifier for larger data sets, since it's less computational costly!
+model <- h2o.deeplearning(y=43, x=1:42, data=train_hex, nfolds=5,
+                          hidden=list(c(10,10),c(50,50),c(200,200)),
+                          epochs=c(1,10), adaptive_rate=TRUE, 
+                          rho=c(0.95,0.99,0.999), epsilon=c(1e-10,1e-7,1e-4),
+                          activation="Rectifier",             # "Tanh", "Rectifier"
+                          l1=c(0,0.0001,0.001), l2=c(0,0.0001,0.001),
+                          classification=FALSE, variable_importances=FALSE)
+model <- h2o.deeplearning(y=43, x=1:42, data=train_hex, nfolds=5,
+                          hidden=list(c(10,10),c(50,50)),
+                          epochs=c(1,10), adaptive_rate=TRUE, 
+                          rho=c(0.95,0.99), epsilon=c(1e-10,1e-5),
+                          activation="RectifierWithDropout",  # "TanhWithDropout", "RectifierWithDropout"
+                          l1=c(0.0001,0.001), l2=c(0.0001,0.001),
+                          input_dropout_ratio=c(0.1, 0.2),
+                          hidden_dropout_ratios=c(0.5,0.5),
+                          classification=FALSE, variable_importances=FALSE)
+best_model <- model@model[[1]]; best_model
+best_params <- best_model@model$params
+# best_params$activation
+best_params$hidden; best_params$epochs
+best_params$rho; best_params$epsilon
+best_params$l1; best_params$l2
+sqrt(best_model@model$train_sqr_error); sqrt(best_model@model$valid_sqr_error)
+# best_model@model$varimp[1:10]
+
+# Hyper-parameter Tuning with Random Search
+models <- c()
+for (i in 1:20) {
+  rand_numlayers <- sample(2:5,1)
+  rand_hidden <- c(sample(10:100,rand_numlayers,T))
+  rand_epochs <- runif(1, 0.1, 10)
+  rho_rand <- runif(1, 0.95, 0.999); epsilon_rand <- runif(1, 1e-10, 1e-4)
+  rand_l1 <- runif(1, 0, 1e-3); rand_l2 <- runif(1, 0, 1e-3)
+  rand_dropout <- c(runif(rand_numlayers, 0, 0.6))
+  rand_input_dropout <- runif(1, 0, 0.5)
+  dlmodel <- h2o.deeplearning(y=43, x=1:42, data=train_hex, nfolds=5, 
+                              epochs=rand_epochs, rho=rho_rand, epsilon=epsilon_rand,
+                              activation="RectifierWithDropout",   # "TanhWithDropout", "RectifierWithDropout"
+                              hidden=rand_hidden, l1=rand_l1, l2=rand_l2,
+                              input_dropout_ratio=rand_input_dropout, 
+                              hidden_dropout_ratios=rand_dropout, 
+                              classification=FALSE)
+  models <- c(models, dlmodel)}
+best_err <- 9.99e+20
+for (i in 1:length(models)) {
+  err <- models[[i]]@model$valid_sqr_error
+  if (err < best_err) { best_err <- err; best_model <- models[[i]] } }
+best_params <- best_model@model$params; best_model
+# best_params$activation
+best_params$hidden; best_params$epochs
+best_params$rho; best_params$epsilon
+best_params$l1; best_params$l2
+best_params$input_dropout_ratio; best_params$hidden_dropout_ratios
+sqrt(best_model@model$train_sqr_error); sqrt(best_model@model$valid_sqr_error)
+
+
+model <- h2o.deeplearning(y=43, x=1:42,                      
+                          data=train_hex_split[[1]],
+                          validation=train_hex_split[[2]],
+                          activation="RectifierWithDropout",   # "Rectifier" "RectifierWithDropout" "Tanh" "TanhWithDropout"
+                          input_dropout_ratio=0.2,   # or 0.2
+                          hidden_dropout_ratios=c(0.5,0.5,0.5,0.5,0.5), # for nodes dropout
+                          adaptive_rate=TRUE, rho=0.99, epsilon=1.0E-8,
+                          rate=0.001,
+                          l1=1.0E-5, l2=0.0,
+                          hidden=c(200,200,200,200,200),
+                          epochs=100,
+                          classification=FALSE,
+                          balance_classes=FALSE,
+                          #                           variable_importances=T
+); model
+sqrt(model@model$train_sqr_error); sqrt(model@model$valid_sqr_error)
+
+model <- h2o.deeplearning(y=43, x=1:42,                       # gut!
+                          data=train_hex_split[[1]],
+                          validation=train_hex_split[[2]],
+                          activation="RectifierWithDropout",   # "Rectifier" "RectifierWithDropout" "Tanh" "TanhWithDropout"
+                          input_dropout_ratio=0.15,   # or 0.2
+                          hidden_dropout_ratios=c(0.5,0.5,0.5,0.5), # for nodes dropout
+                          adaptive_rate=TRUE, rho=0.99, epsilon=1.0E-8,
+                          rate=0.005,
+                          l1=1.0E-5, l2=0.0,
+                          hidden=c(200, 200, 200, 200),
+                          epochs=100,
+                          classification=FALSE,
+                          balance_classes=FALSE,
+                          #                           variable_importances=T
+); model
+
+model <- h2o.deeplearning(y=43, x=1:42,
+                          data=train_hex_split[[1]],
+                          validation=train_hex_split[[2]],
+                          activation="TanhWithDropout",               # "Tanh" "TanhWithDropout" "Rectifier" "RectifierWithDropout"
+                          input_dropout_ratio=0.1,   # or 0.2
+                          hidden_dropout_ratios=c(0.5,0.5,0.5,0.5,0.5), # for nodes dropout
+                          adaptive_rate=TRUE, rho=0.99, epsilon=1.0E-8,
+                          rate=0.005,
+                          l1=1.0E-5, l2=0.0,
+                          hidden=c(50, 50, 50, 50, 50),
+                          epochs=100,
+                          classification=FALSE,
+                          balance_classes=FALSE
+                          #                           variable_importances=T
+); model
+
+model <- h2o.deeplearning(y=43, x=1:42,
+                          data=train_hex_split[[1]],
+                          validation=train_hex_split[[2]],
+                          activation="Rectifier",               # "Tanh" "TanhWithDropout" "Rectifier" "RectifierWithDropout"
+                          #                           input_dropout_ratio=0.1,   # or 0.2
+                          #                           hidden_dropout_ratios=c(0.5,0.5,0.5), # for nodes dropout
+                          adaptive_rate=TRUE, rho=0.99, epsilon=1.0E-8,
+                          rate=0.005,
+                          l1=1.0E-5, l2=0.0,
+                          hidden=c(10, 10, 10, 10, 10, 10, 10, 10, 10, 10),
+                          epochs=100,
+                          classification=FALSE,
+                          balance_classes=FALSE
+                          #                           variable_importances=T
+); model
+
+pr <- as.matrix(h2o.predict(model, train_hex)); obs <- ytraining; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- as.matrix(h2o.predict(model, test_hex)); obs <- ytesting[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+
+
+
+### GLM
+model <- h2o.glm(y="CAPSULE", x=c("AGE","RACE","PSA","DCAPS"), 
+                 data=prostate.hex, family="binomial", nfolds=10, alpha=0.5); model
+
+### K-Means
+model <- h2o.kmeans(data=prostate.hex, centers=10,
+                    cols=c("AGE", "RACE", "VOL", "GLEASON")); model
+
+### Principal Components
+model <- h2o.prcomp(data=australia.hex, standardize=TRUE)
+
+
+
+###########################################################
+### Neural Networks
+
+# turn train and test into matrices for dummy variables
+trainmat <- model.matrix(ytraining~., data=training)
+testmat <- model.matrix(ytesting~.,data=testing)
+# trainmat <- model.matrix(y~., data=datenModell)
+# testmat <- model.matrix(~.,data=test[,-1])
+str(trainmat)
+#turn matrices back into data frames because that seems to be what the neuralnet package likes
+trainmat <- as.data.frame(trainmat)
+testmat <- as.data.frame(testmat)
+#scale count
+ytrainingc <- ytraining/15000000
+ytestingc <- ytesting/15000000
+
+# caret              # , preProc=c("center", "scale")   # , trace=FALSE
+nn <- train(ytrainingc~., data=trainmat, method="nnet", trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneLength=5, trace=FALSE); nn      # super
+nn <- train(ytrainingc~., data=trainmat, method="neuralnet", trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneLength=5, trace=FALSE); nn #
+nn <- train(ytrainingc~., data=trainmat, method="pcaNNet", trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneLength=5, trace=FALSE); nn   # with feature extraction: gut
+nn <- train(ytrainingc~., data=trainmat, method="avNNet", trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneLength=5, trace=FALSE); nn    # Model Averaged Neural Network: gut, relativ lange
+# nn <- train(ytrainingc~., data=trainmat, method="brnn", trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneLength=5, trace=FALSE); nn      # Bayesian Regularized Neural Networks: packages not available
+nn <- train(ytrainingc~., data=trainmat, method="dnn", trControl=trainControl(method="repeatedcv", number=10, repeats=3), tuneLength=5, trace=FALSE); nn       # Stacked AutoEncoder Deep Neural Network: hat nicht funktioniert
+# summary(nn)
+trellis.par.set(caretTheme()); plot(nn)
+require(NeuralNetTools); par(mar=numeric(4), family='serif'); plotnet(nn, alpha=0.6)
+require(RSNNS); garson(nn, 'Y1') # Relative Importance
+lekprofile(nn) # Sensitivity Analysis
+
+# nnet
+require(nnet)
+nn <- nnet(ytrainingc~., data=trainmat, size=2, rang=0.1, decay=5e-4, maxit=200)
+table(ytraining, predict(nn, training, type="class")) # bei Classification
+table(ytesting, predict(nn, testing, type="class"))
+require(NeuralNetTools); plotnet(nn) # Plot NN
+require(RSNNS); garson(nn, 'Y1') # Relative Importance
+lekprofile(nn) # Sensitivity Analysis
+
+### Plot Prognose vs. IST
+pr <- predict(nn, trainmat)*15000000; obs <- ytrainingc[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- predict(nn, testmat)*15000000; obs <- ytestingc[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+pr <- predict(nn, datenModellmat)*15000000; obs <- y[]; plotyydach(obs, pr); print(paste("RMSE:",round(rmse(obs,pr),3))); print(paste("RMSLE:",round(rmsle(obs,pr),3))); print(paste("AUC/ROC:",round(auc(obs,pr),3)))
+
+
+
+
+###########################################################
+### Blend best models
+
+model_rf5 <- read.csv(paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission RF 5000.csv"),header=TRUE, sep=",") # 1,75
+model_xgb <- read.csv(paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission XGB depth6 eta.01 tree271 child20 gamma4.csv"),header=TRUE, sep=",") # 1,75
+model_svm <- read.csv(paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission SVM BOOTSTRAP 1.csv"),header=TRUE, sep=",") # 1,86
+model_rvm <- read.csv(paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission RVM BOOTSTRAP 1.csv"),header=TRUE, sep=",") # 1,87
+
+models <- cbind(model_rf5, model_xgb, model_svm, model_rvm)
+models <- models[, -c(3,5,7)]
+names(models) <- c("Id", "rf5", "xgb", "svm", "rvm")
+
+models$blend2 <- rowMeans(models[, 2:3])
+models$blend3 <- rowMeans(models[, 2:4])
+models$blend4 <- rowMeans(models[, 2:5])
+head(models)
+
+submit <- as.data.frame(models[, c("Id", "blend2")])
+colnames(submit)<-c("Id","Prediction"); head(submit)
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission blend2.csv"), row.names=FALSE)
+
+submit <- as.data.frame(models[, c("Id", "blend3")])
+colnames(submit)<-c("Id","Prediction"); head(submit)
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission blend3.csv"), row.names=FALSE)
+
+submit <- as.data.frame(models[, c("Id", "blend4")])
+colnames(submit)<-c("Id","Prediction"); head(submit)
+write.csv(submit, file=paste0(path, "Kaggle - Restaurant Revenue Prediction - Submission blend4.csv"), row.names=FALSE)
+
+
+```
+
